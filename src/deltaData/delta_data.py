@@ -23,16 +23,8 @@ class deltaData:
     def get_delta_data(self, delta_table_path):
         df = self.spark.read.format("delta").load(delta_table_path)
         return df
-
-    def smart_append(spark, delta_table_path, new_data, id_columns=None):
-        """
-        A function that creates a smart append option on top of Delta Lake with Spark
-        and finds duplicates based on the provided list of columns, or all columns if not provided.
-
-        :param delta_table_path: The path to the directory where the Delta table is stored.
-        :param new_data: The new data frame to append to the Delta table.
-        :param id_columns: The list of columns to use as IDs when checking for duplicates. If not provided, all columns will be used.
-        """
+  
+    def smart_append(self, spark, new_data, delta_table_path, id_cols, partition_by):
         new_data = new_data.withColumn("append_timestamp", current_timestamp()).withColumn("update_timestamp", current_timestamp())
         
         if os.path.exists(delta_table_path):
@@ -44,26 +36,26 @@ class deltaData:
                 .withColumn("append_timestamp", current_timestamp()) \
                 .write \
                 .format("delta") \
+                .partitionBy(*partition_by) \
                 .mode("overwrite") \
                 .option("overwriteSchema", "true") \
                 .save(delta_table_path)
-            return 
+            return
 
-        # left_df and right_df are the two dataframes to join
-        # id_columns is a list of columns to join on
+        df_schema = new_data.schema
 
-        # perform left-outer join
-        joined_df = delta_table.join(new_data, id_columns, "outer")
+        # Get the schema field names excluding the unique key and the column you don't want to update
+        columns_to_update = [field.name for field in df_schema.fields if field.name not in {*id_cols, "append_timestamp"}]
 
-        # select values from right dataframe if they exist, and from left dataframe otherwise
-        result_df = joined_df.select([coalesce(new_data[c], delta_table[c]).alias(c) for c in new_data.columns if c != "append_timestamp"]
-                                    + [coalesce(delta_table["append_timestamp"], new_data["append_timestamp"]).alias("append_timestamp")])
+        # Generate the update column dictionary
+        update_dict = {column: f"source.{column}" for column in columns_to_update}
 
-
-
-        result_df \
-            .write \
-            .format("delta") \
-            .mode("overwrite") \
-            .option("overwriteSchema", "true") \
-            .save(delta_table_path)
+        id_merge = " AND ".join([f"target.{column} = source.{column}" for column in id_cols])
+        deltaTable = DeltaTable.forPath(spark, delta_table_path)
+        # Perform the upsert
+        deltaTable.alias("target").merge(
+            new_data.alias("source"),
+            id_merge
+        ).whenMatchedUpdate(
+            set=update_dict
+        ).whenNotMatchedInsertAll().execute()
