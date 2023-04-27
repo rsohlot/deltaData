@@ -8,8 +8,24 @@ A wrapper over delta lake to provide some functionalities
 
 ## TODO
 
-    [ ] Add compability to store the data in s3.
+```markdown
+[ ] Add compability to store the data in s3.
 
+```
+
+## SETUP
+
+```bash
+python -m venv venv
+
+# for windows , on terminal 
+.\venv\Scripts\activate
+
+# for linux based system
+source venv/bin/activate
+
+pip install -r requirements.txt
+```
 
 ## USAGE
 
@@ -40,5 +56,4 @@ A wrapper over delta lake to provide some functionalities
 
     # compare the data versions
     data.compare_versions(spark, delta_data_path, id_cols)
-
-
+```
